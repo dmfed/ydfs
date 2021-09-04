@@ -51,7 +51,7 @@ func newApiClient(token string, c *http.Client) *apiclient {
 
 // processes request returns response body bytes and error
 // if we're getting non-OK status the method tries to unmarshal
-// api error and return it.
+// api error to struct which imlements error interface.
 func (c *apiclient) do(r *http.Request) ([]byte, error) {
 	r.Header = c.header
 	var (
@@ -77,14 +77,16 @@ func (c *apiclient) do(r *http.Request) ([]byte, error) {
 		if err = json.Unmarshal(data, &e); err != nil {
 			return nil, err
 		}
-		err = e
+		err = &e
 		return nil, err
 	}
 
 	return data, err
 }
 
+// getFile fetches single file bytes.
 func (c *apiclient) getFile(ctx context.Context, name string) ([]byte, error) {
+	// first we need to fetch the download url
 	u, err := url.Parse(urlResourcesDownload)
 	if err != nil {
 		return nil, err
@@ -97,7 +99,7 @@ func (c *apiclient) getFile(ctx context.Context, name string) ([]byte, error) {
 	if err = c.doRequest(ctx, http.MethodGet, u, nil, l); err != nil {
 		return nil, err
 	}
-
+	// performing the actual download
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, l.Href, nil)
 	if err != nil {
 		return nil, err
@@ -105,6 +107,7 @@ func (c *apiclient) getFile(ctx context.Context, name string) ([]byte, error) {
 	return c.do(r)
 }
 
+// getSingleResource fetches resource struct without embedded resources.
 func (c *apiclient) getSingleResource(ctx context.Context, name string) (r resource, err error) {
 	u, err := url.Parse(urlResources)
 	if err != nil {
@@ -118,16 +121,6 @@ func (c *apiclient) getSingleResource(ctx context.Context, name string) (r resou
 	return
 }
 
-func (c *apiclient) isOperational() bool {
-	var d = &diskInfo{}
-	u, _ := url.Parse(urlBase)
-	err := c.doRequest(context.TODO(), http.MethodGet, u, nil, d)
-	if err != nil {
-		return false
-	}
-	return true
-}
-
 // doRequest performs most of the weight lifting with API. If result argument it non-nil
 // then the method tries to unmarshal response into the passed interface.
 // If no body is expected in response or the body needs to be thrown away,
@@ -139,20 +132,17 @@ func (c *apiclient) doRequest(ctx context.Context, method string, u *url.URL, bo
 		return
 	}
 
+	var data []byte
+	if data, err = c.do(r); err != nil {
+		return
+	}
 	// If nil result argument is passed, we don't want
 	// the resp body unmarshalled. returning.
 	if result == nil {
 		return
 	}
-
-	var data []byte
-	if data, err = c.do(r); err != nil {
-		return
-	}
-
 	// If non-nil result argument is passed we'll try to
 	// unmarshal resp body into the interface provided.
 	err = json.Unmarshal(data, &result)
-
 	return
 }

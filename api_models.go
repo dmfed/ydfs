@@ -49,7 +49,7 @@ type resource struct {
 	MimeType         string            `json:"mime_type,omitempty"`        // "image/jpeg", "video/mp4" etc.
 	Size             int64             `json:"size,omitempty"`             // size in bytes (?)
 	Revision         int64             `json:"revision,omitempty"`         // dunno?
-	AntivirusStatus  string            `json:"antivirus_status,omitempty"` // "clean", "not-scanned" etc
+	AntivirusStatus  string            `json:"antivirus_status,omitempty"` // "clean", "not-scanned" etc.
 
 }
 
@@ -106,9 +106,8 @@ type errAPI struct {
 	Message     string `json:"message,omitempty"`
 	Description string `json:"description,omitempty"`
 	Err         string `json:"error,omitempty"`
-	// code        int    // TODO: подклеивать сюда код ответа?
 }
 
-func (e errAPI) Error() string {
+func (e *errAPI) Error() string {
 	return strings.Join([]string{e.Message, e.Description, e.Err}, " ")
 }
