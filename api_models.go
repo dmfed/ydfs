@@ -6,17 +6,17 @@ import (
 )
 
 // DiskInfo provides basic information about the disk
-type diskInfo struct {
+type DiskInfo struct {
 	TrashSize     int           `json:"trash_size,omitempty"` // this and below are in bytes
 	TotalSpace    int           `json:"total_space,omitempty"`
 	UsedSpace     int           `json:"used_space,omitempty"`
-	SystemFolders systemFolders `json:"system_folders,omitempty"`
-	User          user          `json:"user,omitempty"`
+	SystemFolders SystemFolders `json:"system_folders,omitempty"`
+	User          User          `json:"user,omitempty"`
 	Revision      int64         `json:"revision,omitempty"`
 }
 
 // SystemFolders is a list of system folders on the disk
-type systemFolders map[string]string
+type SystemFolders map[string]string
 
 // Link contains URL to request Resource metadata
 type link struct {
@@ -26,7 +26,7 @@ type link struct {
 }
 
 // Resource holds information about the resource (either directory or file)
-type resource struct {
+type Resource struct {
 	PubLicKey        string            `json:"public_key,omitempty"`
 	PublicURL        string            `json:"public_url,omitempty"`
 	Embedded         resourceList      `json:"_embedded,omitempty"`
@@ -44,7 +44,7 @@ type resource struct {
 	Path             string            `json:"path,omitempty"`
 	MD5              string            `json:"md5,omitempty"`
 	SHA256           string            `json:"sha26,omitempty"`
-	CommentIDs       commentIDs        `json:"comment_ids,omitempty"`      // undocumented :)
+	CommentIDs       CommentIDs        `json:"comment_ids,omitempty"`      // undocumented :)
 	Type             string            `json:"type,omitempty"`             // "dir" or "file"
 	MimeType         string            `json:"mime_type,omitempty"`        // "image/jpeg", "video/mp4" etc.
 	Size             int64             `json:"size,omitempty"`             // size in bytes (?)
@@ -57,21 +57,21 @@ type resource struct {
 type resourceList struct {
 	Sort      string     `json:"sort,omitempty"` // list is sorted by this field
 	PubLicKey string     `json:"public_key,omitempty"`
-	Items     []resource `json:"items,omitempty"`
+	Items     []Resource `json:"items,omitempty"`
 	Path      string     `json:"path,omitempty"`
 	Limit     int        `json:"limit,omitempty"`  // this max elements are in Items above
 	Offset    int        `json:"offset,omitempty"` // offset from first resource in directory
 	Total     int        `json:"total,omitempty"`  // total number of elements in directory
 }
 
-type commentIDs struct {
+type CommentIDs struct {
 	PrivateResourceID string `json:"private_resource,omitempty"`
 	PublicResourseID  string `json:"public_resource,omitempty"`
 }
 
 // FileResourceList is a flat list of all files on disk sorted alphabetically
 type filesResourceList struct {
-	Items  []resource `json:"items,omitempty"`
+	Items  []Resource `json:"items,omitempty"`
 	Limit  int        `json:"limit,omitempty"`  // this max elements are in Items above
 	Offset int        `json:"offset,omitempty"` // offset from first resource in directory
 }
@@ -79,13 +79,13 @@ type filesResourceList struct {
 // LastUploadedResourceList is a list of uploaded files sorted by
 // upload time from oldest to newest
 type lastUploadedResourceList struct {
-	Items []resource `json:"items,omitempty"`
+	Items []Resource `json:"items,omitempty"`
 	Limit int        `json:"limit,omitempty"`
 }
 
 // PublicResourcesList represents a list of publicly available resources
 type publicResourcesList struct {
-	Items  []resource `json:"items,omitempty"`
+	Items  []Resource `json:"items,omitempty"`
 	Type   string     `json:"type,omitempty"`
 	Limit  int        `json:"limit,omitempty"`
 	Offset int        `json:"offset,omitempty"`
@@ -95,7 +95,7 @@ type operation struct {
 	Status string `json:"status,omitempty"`
 }
 
-type user struct {
+type User struct {
 	Country string `json:"country,omitempty`
 	Login   string `json:"login,omitempty`
 	Name    string `json:"display_name,omitempty`

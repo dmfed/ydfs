@@ -1,7 +1,6 @@
 package ydfs
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 	"os"
@@ -10,12 +9,10 @@ import (
 
 var client = newApiClient(os.Getenv("YD"), http.DefaultClient)
 
-var ctx = context.Background()
-
-func Test_doRequest(t *testing.T) {
-	var d = &diskInfo{}
+func Test_requestInterface(t *testing.T) {
+	var d = &DiskInfo{}
 	u, _ := url.Parse(urlBase)
-	err := client.doRequest(ctx, http.MethodGet, u, nil, d)
+	err := client.requestInterface(ctx, http.MethodGet, u, nil, d)
 	if err != nil {
 		t.Errorf("error with correct credentials: %v", err)
 	}
@@ -23,7 +20,7 @@ func Test_doRequest(t *testing.T) {
 }
 
 func Test_getSingleResource(t *testing.T) {
-	res, err := client.getSingleResource(ctx, "/")
+	res, err := client.getResource(ctx, "/")
 	if err != nil {
 		t.Error(err)
 	}
