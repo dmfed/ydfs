@@ -106,10 +106,10 @@ type operation struct {
 }
 
 type User struct {
-	Country string `json:"country,omitempty`
-	Login   string `json:"login,omitempty`
-	Name    string `json:"display_name,omitempty`
-	UID     string `json:"uid,omitempty`
+	Country string `json:"country,omitempty"`
+	Login   string `json:"login,omitempty"`
+	Name    string `json:"display_name,omitempty"`
+	UID     string `json:"uid,omitempty"`
 }
 
 func (u *User) String() string {
