@@ -64,9 +64,7 @@ func (c *apiclient) do(r *http.Request) ([]byte, error) {
 	if err != nil {
 		return []byte{}, err
 	}
-	if resp != nil {
-		defer resp.Body.Close()
-	}
+	defer resp.Body.Close()
 
 	var data []byte
 	data, err = io.ReadAll(resp.Body)
