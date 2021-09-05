@@ -1,6 +1,7 @@
 package ydfs
 
 import (
+	"bytes"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,25 +13,26 @@ var client = newApiClient(os.Getenv("YD"), http.DefaultClient)
 func Test_requestInterface(t *testing.T) {
 	var d = &DiskInfo{}
 	u, _ := url.Parse(urlBase)
-	err := client.requestInterface(ctx, http.MethodGet, u, nil, d)
+	err := client.requestInterface(http.MethodGet, u, nil, d)
 	if err != nil {
 		t.Errorf("error with correct credentials: %v", err)
 	}
-	t.Logf("%+v", d)
 }
 
-func Test_getSingleResource(t *testing.T) {
-	res, err := client.getResource(ctx, "/")
+func Test_putFile(t *testing.T) {
+	err := client.putFileTruncate(testFileName, testFileBody)
 	if err != nil {
-		t.Error(err)
+		t.Logf("upload failed: %v", err)
 	}
-	t.Logf("%+v", res)
 }
 
 func Test_getFile(t *testing.T) {
-	b, err := client.getFile(ctx, "/go.mod")
+	b, err := client.getFile(testFileName)
 	if err != nil {
-		t.Error(err)
+		t.Errorf("getting test file failed: %v", err)
 	}
-	t.Log(string(b))
+	res := bytes.Compare(b, testFileBody)
+	if res != 0 {
+		t.Errorf("error comparing testfile with fetched result")
+	}
 }

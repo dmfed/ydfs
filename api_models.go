@@ -1,18 +1,27 @@
 package ydfs
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
 
 // DiskInfo provides basic information about the disk
 type DiskInfo struct {
-	TrashSize     int           `json:"trash_size,omitempty"` // this and below are in bytes
-	TotalSpace    int           `json:"total_space,omitempty"`
-	UsedSpace     int           `json:"used_space,omitempty"`
+	TrashSize     int64         `json:"trash_size,omitempty"` // this and below are in bytes
+	TotalSpace    int64         `json:"total_space,omitempty"`
+	UsedSpace     int64         `json:"used_space,omitempty"`
 	SystemFolders SystemFolders `json:"system_folders,omitempty"`
 	User          User          `json:"user,omitempty"`
 	Revision      int64         `json:"revision,omitempty"`
+}
+
+func (d *DiskInfo) String() string {
+	user := d.User.String()
+	space := fmt.Sprintf("Total space:\t%d", d.TotalSpace)
+	used := fmt.Sprintf("Used space:\t%d", d.UsedSpace)
+	trash := fmt.Sprintf("Trash size:\t%d", d.TrashSize)
+	return strings.Join([]string{user, space, used, trash}, "\n")
 }
 
 // SystemFolders is a list of system folders on the disk
@@ -20,9 +29,10 @@ type SystemFolders map[string]string
 
 // Link contains URL to request Resource metadata
 type link struct {
-	Href      string `json:"href,omitempty"`
-	Method    string `json:"method,omitempty"`
-	Templated bool   `json:"templated,omitempty"`
+	OperationID string `json:"operation_id,omitempty"`
+	Href        string `json:"href,omitempty"`
+	Method      string `json:"method,omitempty"`
+	Templated   bool   `json:"templated,omitempty"`
 }
 
 // Resource holds information about the resource (either directory or file)
@@ -100,6 +110,10 @@ type User struct {
 	Login   string `json:"login,omitempty`
 	Name    string `json:"display_name,omitempty`
 	UID     string `json:"uid,omitempty`
+}
+
+func (u *User) String() string {
+	return fmt.Sprintf("Username:\t%s", u.Login)
 }
 
 type errAPI struct {

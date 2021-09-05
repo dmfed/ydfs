@@ -1,11 +1,13 @@
 package ydfs
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 )
 
 const (
@@ -34,6 +36,12 @@ const (
 
 	// Async operations status
 	urlOperations = urlBase + "/operations"
+)
+
+var (
+// ErrApi - network error of some other technical stuff
+// ErrResourceNotFound - resource was not found by API
+// ErrUnknown - some strange shit I could not predict
 )
 
 type apiclient struct {
@@ -72,25 +80,25 @@ func (c *apiclient) do(r *http.Request) ([]byte, error) {
 		return []byte{}, err
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
 		var e errAPI
 		if err = json.Unmarshal(data, &e); err != nil {
-			return []byte{}, err
+			return []byte{}, fmt.Errorf("unknown response with code %d from API: %s", resp.StatusCode, string(data))
 		}
 		err = &e
 		return []byte{}, err
 	}
 
-	return data, err
+	return data, nil
 }
 
 // requestInterface performs most of the weight lifting with API. If result argument it non-nil
 // then the method tries to unmarshal response into the passed interface.
 // If no body is expected in response or the body needs to be thrown away,
 // result must be nil.
-func (c *apiclient) requestInterface(ctx context.Context, method string, u *url.URL, body io.Reader, result interface{}) (err error) {
+func (c *apiclient) requestInterface(method string, u *url.URL, body io.Reader, result interface{}) (err error) {
 	var r *http.Request
-	r, err = http.NewRequestWithContext(ctx, method, u.String(), body)
+	r, err = http.NewRequest(method, u.String(), body)
 	if err != nil {
 		return
 	}
@@ -111,17 +119,17 @@ func (c *apiclient) requestInterface(ctx context.Context, method string, u *url.
 }
 
 // getDiskInfo fetches information about user's Disk.
-func (c *apiclient) getDiskInfo(ctx context.Context) (info DiskInfo, err error) {
+func (c *apiclient) getDiskInfo() (info DiskInfo, err error) {
 	u, err := url.Parse(urlBase)
 	if err != nil {
 		return
 	}
-	err = c.requestInterface(ctx, http.MethodGet, u, nil, &info)
+	err = c.requestInterface(http.MethodGet, u, nil, &info)
 	return
 }
 
 // getFile fetches single file bytes.
-func (c *apiclient) getFile(ctx context.Context, name string) ([]byte, error) {
+func (c *apiclient) getFile(name string) ([]byte, error) {
 	// first we need to fetch the download url
 	u, err := url.Parse(urlResourcesDownload)
 	if err != nil {
@@ -132,40 +140,123 @@ func (c *apiclient) getFile(ctx context.Context, name string) ([]byte, error) {
 	u.RawQuery = v.Encode()
 
 	var l = &link{}
-	if err = c.requestInterface(ctx, http.MethodGet, u, nil, l); err != nil {
+	if err = c.requestInterface(http.MethodGet, u, nil, l); err != nil {
 		return []byte{}, err
 	}
+	switch l.Templated {
+	case true:
+		fallthrough
+	default:
+	}
 	// performing the actual download
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, l.Href, nil)
+	r, err := http.NewRequest(http.MethodGet, l.Href, nil)
 	if err != nil {
 		return []byte{}, err
 	}
 	return c.do(r)
 }
 
-// getSingleResource fetches resource struct without embedded resources.
-func (c *apiclient) getResource(ctx context.Context, name string) (r Resource, err error) {
+func (c *apiclient) putFile(name string, overwrite bool, data []byte) error {
+	u, err := url.Parse(urlResourcesUpload)
+	if err != nil {
+		return err
+	}
+	v := make(url.Values)
+	v.Add("path", name)
+	if overwrite {
+		v.Add("overwrite", "true")
+	}
+	u.RawQuery = v.Encode()
+	var l = &link{}
+	if err = c.requestInterface(http.MethodGet, u, nil, l); err != nil {
+		return err
+	}
+
+	switch l.Templated {
+	case true:
+		fallthrough
+	default:
+	}
+	// performing the actual upload
+	r, err := http.NewRequest(http.MethodPut, l.Href, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	_, err = c.do(r)
+	return err
+}
+
+func (c *apiclient) putFileTruncate(name string, data []byte) error {
+	return c.putFile(name, true, data)
+}
+
+func (c *apiclient) putFileNoTruncate(name string, data []byte) error {
+	return c.putFile(name, false, data)
+}
+
+func (c *apiclient) mkdir(name string) error {
+	u, err := url.Parse(urlResources)
+	if err != nil {
+		return err
+	}
+	v := make(url.Values)
+	v.Add("path", name)
+	u.RawQuery = v.Encode()
+	var l = link{}
+	err = c.requestInterface(http.MethodPut, u, nil, &l)
+	return err
+}
+
+// getResource fetches Resource identified by name from the API.
+// if limit >= 0 then len(Resource.Embedded.Items) will not exceed limit.
+func (c *apiclient) getResource(name string, limit int) (r Resource, err error) {
 	u, err := url.Parse(urlResources)
 	if err != nil {
 		return
 	}
 	v := make(url.Values)
 	v.Add("path", name)
-	v.Add("limit", "0")
+	if limit >= 0 {
+		v.Add("limit", strconv.Itoa(limit))
+	}
 	u.RawQuery = v.Encode()
-	err = c.requestInterface(ctx, http.MethodGet, u, nil, &r)
+	err = c.requestInterface(http.MethodGet, u, nil, &r)
 	return
 }
 
-func (c *apiclient) getResourceWithEmbedded(ctx context.Context, name string) (Resource, error) {
-	var r = Resource{}
+// getResourceSingle fetches Resource without embedded resuorces
+func (c *apiclient) getResourceSingle(name string) (Resource, error) {
+	return c.getResource(name, 0)
+}
+
+// getResourceWithEmbedded fetches Resource with embedded resources
+func (c *apiclient) getResourceWithEmbedded(name string) (Resource, error) {
+	return c.getResource(name, -1)
+}
+
+func (c *apiclient) delResource(name string, permanently bool) error {
 	u, err := url.Parse(urlResources)
 	if err != nil {
-		return r, err
+		return err
 	}
 	v := make(url.Values)
 	v.Add("path", name)
+	if permanently {
+		v.Add("permanently", "true")
+	}
 	u.RawQuery = v.Encode()
-	err = c.requestInterface(ctx, http.MethodGet, u, nil, &r)
-	return r, err
+	r, err := http.NewRequest(http.MethodDelete, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	_, err = c.do(r)
+	return err
+}
+
+func (c *apiclient) delResourcePermanently(name string) error {
+	return c.delResource(name, true)
+}
+
+func (c *apiclient) delResourceTrash(name string) error {
+	return c.delResource(name, false)
 }

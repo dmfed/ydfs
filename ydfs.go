@@ -2,7 +2,6 @@ package ydfs
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -10,22 +9,65 @@ import (
 	"time"
 )
 
-var ctx = context.TODO()
-
 // FS provides access to files stored in
-// Yandex Disk. It implements fs.FS interface of
-// standard library. FS has additional methods
+// Yandex Disk. It complies with fs.FS, fs.GlobFS,
+// fs.ReadDirFS, fs.ReadFileFS, fs.StatFS, fs.SubFS
+// interfaces of standard library. FS has additional methods
 // specific to metainformation stored by Yandex -
 // see DiskInfo and UserInfo methods.
-type FS struct {
+type FS interface {
+	// Open
+	Open(name string) (fs.File, error)
+	Stat(name string) (fs.FileInfo, error)
+	// Sub(dir string) (FS, error)
+	ReadFile(name string) ([]byte, error)
+
+	// ReadDir reads the contents of the directory and returns
+	// a slice of up to n DirEntry values in directory order.
+	// Subsequent calls on the same file will yield further DirEntry values.
+	//
+	// If n > 0, ReadDir returns at most n DirEntry structures.
+	// In this case, if ReadDir returns an empty slice, it will return
+	// a non-nil error explaining why.
+	// At the end of a directory, the error is io.EOF.
+	//
+	// If n <= 0, ReadDir returns all the DirEntry values from the directory
+	// in a single slice. In this case, if ReadDir succeeds (reads all the way
+	// to the end of the directory), it returns the slice and a nil error.
+	// If it encounters an error before the end of the directory,
+	// ReadDir returns the DirEntry list read until that point and a non-nil error.
+	ReadDir(name string) ([]fs.DirEntry, error)
+
+	// WriteFile writes data to the named file, creating it if necessary.
+	// If the file does not exist, WriteFile creates it
+	// otherwise WriteFile truncates it before writing.
+	WriteFile(name string, data []byte) error
+
+	// Mkdir creates a new directory in a Disk with the specified name
+	Mkdir(name string) error
+	// MkdirAll creates a directory named path, along with any necessary parents,
+	// and returns nil, or else returns an error.
+	// MkdirAll(path string) error
+
+	// Remove removes the named file or (empty) directory.
+	Remove(name string) error
+	// RemoveAll removes path and any children it contains. It removes everything it can
+	// but returns the first error it encounters. If the path does not exist,
+	// RemoveAll returns nil (no error).
+	RemoveAll(path string) error
+}
+
+// ydfs implements FS interface
+type ydfs struct {
 	client *apiclient
 	path   string
 }
 
 // New returns ydfs.FS which is compliant with
 // standard library's fs.FS interface. Token is required for authorization.
+// Pre-configured http.Client can be supplied (e.g. with timeout set to specific value).
 // If client is nil then http.DefaultClient is used.
-func New(token string, client *http.Client) (fs.FS, error) {
+func New(token string, client *http.Client) (FS, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -33,97 +75,105 @@ func New(token string, client *http.Client) (fs.FS, error) {
 	// checking whether we can fetch disk metadata to
 	// make sure that token is valid and we we can send
 	// requests to the API.
-	if _, err := c.getDiskInfo(ctx); err != nil {
+	if _, err := c.getDiskInfo(); err != nil {
 		return nil, err
 	}
-	return &FS{client: c, path: "/"}, nil
+	return &ydfs{client: c, path: "/"}, nil
 }
 
 // Open implements fs.Fs interface
-func (f *FS) Open(name string) (fs.File, error) {
-	res, err := f.client.getResource(ctx, name)
+func (f *ydfs) Open(name string) (fs.File, error) {
+	_, err := f.client.getResourceSingle(name)
 	if err != nil {
-		return nil, err
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
-	file := File{f.client, name, res, nil}
+	file := ydfile{f.client, name, 0, nil}
 	return &file, nil
 }
 
 // Stat implements fs.StatFS
-func (f *FS) Stat(name string) (fs.FileInfo, error) {
-	res, err := f.client.getResource(ctx, name)
+func (f *ydfs) Stat(name string) (fs.FileInfo, error) {
+	res, err := f.client.getResourceSingle(name)
 	if err != nil {
 		return nil, err
 	}
-	return &FileInfo{res}, nil
+	return &ydinfo{res}, nil
 }
 
 // Sub implements fs.SubFS
-func (f *FS) Sub(dir string) (fs.FS, error) {
-	res, err := f.client.getResource(ctx, dir)
+func (f *ydfs) Sub(dir string) (FS, error) {
+	res, err := f.client.getResourceSingle(dir)
 	if err != nil {
 		return nil, err
 	}
 	if res.Type != "dir" {
 		return nil, fmt.Errorf("%s is not a directory", dir)
 	}
-	return &FS{client: f.client, path: dir}, nil
+	return &ydfs{client: f.client, path: dir}, nil
 }
 
 // ReadFile implements fs.ReadFileFS
-func (f *FS) ReadFile(name string) ([]byte, error) {
-	return f.client.getFile(ctx, name)
+func (f *ydfs) ReadFile(name string) ([]byte, error) {
+	return f.client.getFile(name)
 }
 
 // ReadDir implements fs.ReadDirFS
-func (f *FS) ReadDir(name string) ([]fs.DirEntry, error) {
-	res, err := f.client.getResourceWithEmbedded(ctx, name)
+func (f *ydfs) ReadDir(name string) ([]fs.DirEntry, error) {
+	res, err := f.client.getResourceWithEmbedded(name)
 	if err != nil {
 		return []fs.DirEntry{}, err
 	}
 	entries := make([]fs.DirEntry, len(res.Embedded.Items))
 	for i, r := range res.Embedded.Items {
-		entries[i] = &FileInfo{r}
+		entries[i] = &ydinfo{r}
 	}
 	return entries, nil
 }
 
-// Below are Specific methods of FS which fetch info from
-// Yandex Disk API.
-
-// DiskInfo fetches current metadata of a disk.
-// If fetched successfully, returns non-empty DiskInfo.
-// Always returns non-nil struct, which is empty in case of
-// error.
-func (f *FS) DiskInfo() (DiskInfo, error) {
-	return f.client.getDiskInfo(ctx)
+func (f *ydfs) WriteFile(name string, data []byte) error {
+	return f.client.putFileTruncate(name, data)
 }
 
-// UserInfo fetches current user details.
-// If fetched successfully, returns non-empty User struct.
-// Always returns non-nil struct, which is empty in case of
-// error.
-func (f *FS) UserInfo() (User, error) {
-	info, err := f.client.getDiskInfo(ctx)
-	if err != nil {
-		return User{}, err
+func (f *ydfs) Mkdir(name string) error {
+	return f.client.mkdir(name)
+}
+
+/* func (f *ydfs) MkdirAll(path string) error {
+	split := strings.Split(strings.Trim(path, "/"))
+	start := 0
+	toMake := ""
+	for _, dirname := range split {
+		toMake += "/" + dirname
+		s, err := f.Stat(toMake)
+		if err != nil {
+
+		}
 	}
-	return info.User, nil
+} */
+
+// Remove
+func (f *ydfs) Remove(name string) error {
+	//TODO:
+	//return f.client.delResourcePermanently(name)
+	return f.client.delResourceTrash(name)
 }
 
-// A File provides access to a single file and
-// represents a file stored in a cloud. It is fully compliant
-// with fs.File interface.
-type File struct {
-	client *apiclient
-	path   string
-	res    Resource
-	data   []byte
+// TODO
+func (f *ydfs) RemoveAll(path string) error {
+	return nil
+}
+
+// ydfile implements File interface
+type ydfile struct {
+	client   *apiclient
+	path     string
+	rdoffset int
+	data     []byte
 }
 
 // Read implements fs.File
-func (f *File) Read(b []byte) (int, error) {
-	fileBytes, err := f.client.getFile(ctx, f.path)
+func (f *ydfile) Read(b []byte) (int, error) {
+	fileBytes, err := f.client.getFile(f.path)
 	if err != nil {
 		return 0, err
 	}
@@ -133,26 +183,29 @@ func (f *File) Read(b []byte) (int, error) {
 }
 
 // Stat implements fs.File.
-func (f *File) Stat() (fs.FileInfo, error) {
-	res, err := f.client.getResource(ctx, f.path)
+func (f *ydfile) Stat() (fs.FileInfo, error) {
+	res, err := f.client.getResourceSingle(f.path)
 	if err != nil {
 		return nil, err
 	}
-	return &FileInfo{res}, err
+	return &ydinfo{res}, err
 }
 
 // Close implements fs.File
-func (f *File) Close() error {
+func (f *ydfile) Close() error {
 	return nil
 }
 
 // ReadDir implements fs.ReadDirFile.
-func (f *File) ReadDir(n int) ([]fs.DirEntry, error) {
-	// return err if not dir
-	res, err := f.client.getResourceWithEmbedded(ctx, f.path)
+func (f *ydfile) ReadDir(n int) ([]fs.DirEntry, error) {
+	if f.rdoffset != 0 {
+		//TODO fetch with offset and only return needed values
+	}
+	res, err := f.client.getResourceWithEmbedded(f.path)
 	if err != nil {
 		return []fs.DirEntry{}, err
 	}
+	// return err if not dir
 	if res.Type != "dir" {
 		return []fs.DirEntry{}, fmt.Errorf("%s is not a directory", f.path)
 	}
@@ -160,64 +213,68 @@ func (f *File) ReadDir(n int) ([]fs.DirEntry, error) {
 		entries   []fs.DirEntry
 		errResult error
 	)
+	have := len(res.Embedded.Items)
 	if n <= 0 {
-		entries = make([]fs.DirEntry, len(res.Embedded.Items))
+		entries = make([]fs.DirEntry, have)
 		n = len(res.Embedded.Items)
 		errResult = nil
-	} else if n > len(res.Embedded.Items) {
+	} else if n > have {
 		errResult = io.EOF
 		entries = make([]fs.DirEntry, n)
+	} else if n < len(res.Embedded.Items) {
+		entries = make([]fs.DirEntry, n)
+		f.rdoffset = n // on next call will return following items
 	}
 	for i := 0; i < n; i++ {
-		entries[i] = &FileInfo{res.Embedded.Items[i]}
+		entries[i] = &ydinfo{res.Embedded.Items[i]}
 	}
 	return entries, errResult
 }
 
-// FileInfo describes a file and is returned by Stat.
-type FileInfo struct {
+// ydinfo implements fs.FileInfo and fs.DirEntry.
+type ydinfo struct {
 	res Resource
 }
 
 // Name implements fs.FileInfo
-func (f *FileInfo) Name() string {
-	return f.res.Name
+func (y *ydinfo) Name() string {
+	return y.res.Name
 }
 
 // Size implements fs.FileInfo
-func (f *FileInfo) Size() int64 {
-	return f.res.Size
+func (y *ydinfo) Size() int64 {
+	return y.res.Size
 }
 
 // Mode implements fs.FileInfo
-func (f *FileInfo) Mode() fs.FileMode {
-	if f.IsDir() {
-		return 1 << (32 - 1)
+func (y *ydinfo) Mode() fs.FileMode {
+	if y.IsDir() {
+		return 1 << (32 - 1) // the only required parameter for filemode
 	}
 	return 0
 }
 
 // ModTime implements fs.FileInfo
-func (f *FileInfo) ModTime() time.Time {
-	return f.res.Modified
+func (y *ydinfo) ModTime() time.Time {
+	return y.res.Modified
 }
 
 // IsDir implements fs.FileInfo
-func (f *FileInfo) IsDir() bool {
-	return f.res.Type == "dir" || false
+func (y *ydinfo) IsDir() bool {
+	return y.res.Type == "dir"
 }
 
 // Sys implements fs.FileInfo
-func (f *FileInfo) Sys() interface{} {
+func (y *ydinfo) Sys() interface{} {
 	return nil
 }
 
 // Type implements fs.DirEntry
-func (f *FileInfo) Type() fs.FileMode {
-	return f.Mode()
+func (y *ydinfo) Type() fs.FileMode {
+	return y.Mode()
 }
 
 // Info implements fs.DirEntry
-func (f *FileInfo) Info() (fs.FileInfo, error) {
-	return f, nil
+func (y *ydinfo) Info() (fs.FileInfo, error) {
+	return y, nil
 }
