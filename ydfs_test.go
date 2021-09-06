@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	testFileBody = []byte("this is a test file")
-	testFileName = "/test.txt"
-	testDirName  = "/test/"
+	testFileBody    = []byte("this is a test file")
+	testRootDirName = "/"
+	testFileName    = "test.txt"
+	testDirName     = "/test/"
 )
 
 func TestWriteFile(t *testing.T) {
@@ -18,7 +19,7 @@ func TestWriteFile(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if err := fsys.WriteFile(testFileName, testFileBody); err != nil {
+	if err := fsys.WriteFile(testRootDirName+testFileName, testFileBody); err != nil {
 		t.Errorf("error writing test file: %v", err)
 	}
 }
@@ -34,15 +35,19 @@ func TestRead(t *testing.T) {
 	}
 	buf := make([]byte, len(testFileBody))
 	n, err := file.Read(buf)
-	t.Logf("n = %v, err = %v\ndata: %v", n, err, string(buf))
+	if n != len(testFileBody) || err != nil {
+		t.Errorf("file Read() fails, want n = %v, have n = %v, err: %v", len(testFileBody), n, err)
+	}
 	stats, err := file.Stat()
 	if err != nil {
 		t.Error(err)
 	}
+	if !(stats.Name() == testFileName) || stats.IsDir() {
+		t.Errorf("testfile Stat() method returns incorrect values, want: %v, have: %v", testFileName, stats.Name())
+	}
 	if !bytes.Equal(buf, testFileBody) {
 		t.Errorf("test file received from disk differs")
 	}
-	t.Log(stats.Name(), stats.Size(), stats.IsDir())
 }
 
 func TestStatRoot(t *testing.T) {
@@ -54,7 +59,9 @@ func TestStatRoot(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	t.Logf("%+v", stat)
+	if stat.Name() != "/" || !stat.IsDir() {
+		t.Errorf("Stat() for root dir returns incorrect values, want: %v, have: %v", "/", stat.Name())
+	}
 }
 
 func TestReadDirFS(t *testing.T) {
@@ -66,8 +73,15 @@ func TestReadDirFS(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	found := false
 	for _, entry := range entries {
-		t.Logf("name: %v, is dir: %v", entry.Name(), entry.IsDir())
+		if entry.Name() == testFileName && !entry.IsDir() {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("direntries did not contain test file data")
+		t.Logf("%+v", entries)
 	}
 }
 
