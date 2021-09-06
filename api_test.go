@@ -31,8 +31,8 @@ func Test_getFile(t *testing.T) {
 	if err != nil {
 		t.Errorf("getting test file failed: %v", err)
 	}
-	res := bytes.Compare(b, testFileBody)
-	if res != 0 {
+
+	if !bytes.Equal(b, testFileBody) {
 		t.Errorf("error comparing testfile with fetched result")
 	}
 }

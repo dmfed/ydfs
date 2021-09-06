@@ -1,6 +1,7 @@
 package ydfs
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"testing"
@@ -31,12 +32,15 @@ func TestRead(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	buf := make([]byte, 120)
+	buf := make([]byte, len(testFileBody))
 	n, err := file.Read(buf)
 	t.Logf("n = %v, err = %v\ndata: %v", n, err, string(buf))
 	stats, err := file.Stat()
 	if err != nil {
 		t.Error(err)
+	}
+	if !bytes.Equal(buf, testFileBody) {
+		t.Errorf("test file received from disk differs")
 	}
 	t.Log(stats.Name(), stats.Size(), stats.IsDir())
 }
