@@ -17,6 +17,7 @@ func Test_requestInterface(t *testing.T) {
 	if err != nil {
 		t.Errorf("error with correct credentials: %v", err)
 	}
+	t.Log(d)
 }
 
 func Test_putFile(t *testing.T) {
@@ -35,4 +36,16 @@ func Test_getFile(t *testing.T) {
 	if !bytes.Equal(b, testFileBody) {
 		t.Errorf("error comparing testfile with fetched result")
 	}
+}
+
+func Test_GetPaths(t *testing.T) {
+	for _, path := range []string{"/", "/go.mod", "/nulls10.b", "/Reading/Math"} {
+		res, err := client.getResourceSingle(path)
+		if err != nil {
+			t.Error(err)
+		}
+		t.Logf("name: %s, path: %s", res.Name, res.Path)
+	}
+	root, _ := os.Stat("/")
+	t.Logf("root name: %s", root.Name())
 }

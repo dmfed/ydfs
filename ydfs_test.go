@@ -2,6 +2,8 @@ package ydfs
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"testing"
@@ -48,6 +50,24 @@ func TestRead(t *testing.T) {
 	if !bytes.Equal(buf, testFileBody) {
 		t.Errorf("test file received from disk differs")
 	}
+	anotherbuf := make([]byte, 10)
+	if n, err := file.Read(anotherbuf); n > 0 || !errors.Is(err, io.EOF) {
+		t.Errorf("file Read does not return EOF want n = 0, got n = %d", n)
+	}
+}
+
+func TestIncorrectRead(t *testing.T) {
+	fs, err := New(os.Getenv("YD"), nil)
+	if err != nil {
+		t.Error(err)
+	}
+	file, err := fs.Open("/Reading")
+	if err != nil {
+		t.Error(err)
+	}
+	buf := make([]byte, 2048)
+	n, err := file.Read(buf)
+	t.Logf("n = %d, err = %v", n, err)
 }
 
 func TestStatRoot(t *testing.T) {

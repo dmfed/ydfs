@@ -49,8 +49,8 @@ type apiclient struct {
 	client *http.Client
 }
 
-// newApiClient создаст клиент API, использующий предоставленный
-// http.Client.
+// newApiClient createst Yandex Disk API client, which uses
+// the provided http.Client.
 func newApiClient(token string, c *http.Client) *apiclient {
 	h := make(http.Header)
 	h.Add("Authorization", "OAuth "+token)
