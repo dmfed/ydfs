@@ -11,7 +11,7 @@ import (
 var client = newApiClient(os.Getenv("YD"), http.DefaultClient)
 
 func Test_requestInterface(t *testing.T) {
-	var d = &DiskInfo{}
+	var d = &diskInfo{}
 	u, _ := url.Parse(urlBase)
 	err := client.requestInterface(http.MethodGet, u, nil, d)
 	if err != nil {

@@ -7,16 +7,16 @@ import (
 )
 
 // DiskInfo provides basic information about the disk
-type DiskInfo struct {
+type diskInfo struct {
 	TrashSize     int64         `json:"trash_size,omitempty"` // this and below are in bytes
 	TotalSpace    int64         `json:"total_space,omitempty"`
 	UsedSpace     int64         `json:"used_space,omitempty"`
-	SystemFolders SystemFolders `json:"system_folders,omitempty"`
-	User          User          `json:"user,omitempty"`
+	SystemFolders systemFolders `json:"system_folders,omitempty"`
+	User          user          `json:"user,omitempty"`
 	Revision      int64         `json:"revision,omitempty"`
 }
 
-func (d *DiskInfo) String() string {
+func (d *diskInfo) String() string {
 	user := d.User.String()
 	space := fmt.Sprintf("Total space:\t%d", d.TotalSpace)
 	used := fmt.Sprintf("Used space:\t%d", d.UsedSpace)
@@ -25,7 +25,7 @@ func (d *DiskInfo) String() string {
 }
 
 // SystemFolders is a list of system folders on the disk
-type SystemFolders map[string]string
+type systemFolders map[string]string
 
 // Link contains URL to request Resource metadata
 type link struct {
@@ -36,7 +36,7 @@ type link struct {
 }
 
 // Resource holds information about the resource (either directory or file)
-type Resource struct {
+type resource struct {
 	PubLicKey        string            `json:"public_key,omitempty"`
 	PublicURL        string            `json:"public_url,omitempty"`
 	Embedded         resourceList      `json:"_embedded,omitempty"`
@@ -67,7 +67,7 @@ type Resource struct {
 type resourceList struct {
 	Sort      string     `json:"sort,omitempty"` // list is sorted by this field
 	PubLicKey string     `json:"public_key,omitempty"`
-	Items     []Resource `json:"items,omitempty"`
+	Items     []resource `json:"items,omitempty"`
 	Path      string     `json:"path,omitempty"`
 	Limit     int        `json:"limit,omitempty"`  // this max elements are in Items above
 	Offset    int        `json:"offset,omitempty"` // offset from first resource in directory
@@ -81,7 +81,7 @@ type CommentIDs struct {
 
 // FileResourceList is a flat list of all files on disk sorted alphabetically
 type filesResourceList struct {
-	Items  []Resource `json:"items,omitempty"`
+	Items  []resource `json:"items,omitempty"`
 	Limit  int        `json:"limit,omitempty"`  // this max elements are in Items above
 	Offset int        `json:"offset,omitempty"` // offset from first resource in directory
 }
@@ -89,13 +89,13 @@ type filesResourceList struct {
 // LastUploadedResourceList is a list of uploaded files sorted by
 // upload time from oldest to newest
 type lastUploadedResourceList struct {
-	Items []Resource `json:"items,omitempty"`
+	Items []resource `json:"items,omitempty"`
 	Limit int        `json:"limit,omitempty"`
 }
 
 // PublicResourcesList represents a list of publicly available resources
 type publicResourcesList struct {
-	Items  []Resource `json:"items,omitempty"`
+	Items  []resource `json:"items,omitempty"`
 	Type   string     `json:"type,omitempty"`
 	Limit  int        `json:"limit,omitempty"`
 	Offset int        `json:"offset,omitempty"`
@@ -105,14 +105,14 @@ type operation struct {
 	Status string `json:"status,omitempty"`
 }
 
-type User struct {
+type user struct {
 	Country string `json:"country,omitempty"`
 	Login   string `json:"login,omitempty"`
 	Name    string `json:"display_name,omitempty"`
 	UID     string `json:"uid,omitempty"`
 }
 
-func (u *User) String() string {
+func (u *user) String() string {
 	return fmt.Sprintf("Username:\t%s", u.Login)
 }
 
@@ -123,5 +123,9 @@ type errAPI struct {
 }
 
 func (e *errAPI) Error() string {
-	return strings.Join([]string{e.Message, e.Description, e.Err}, " ")
+	return strings.Join([]string{e.Message, e.Description}, " ")
+}
+
+func (e *errAPI) NotFound() bool {
+	return e.Err == "DiskNotFoundError"
 }

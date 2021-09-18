@@ -10,10 +10,12 @@ import (
 )
 
 var (
-	testFileBody    = []byte("this is a test file")
-	testRootDirName = "/"
-	testFileName    = "test.txt"
-	testDirName     = "/test/"
+	testFileBody          = []byte("this is a test file")
+	testRootDirName       = "/"
+	testFileName          = "test.txt"
+	testDirName           = "/test/"
+	testCascadeDirsMake   = "/test2/test3/test4"
+	testCascadeDirsRemove = "/test2"
 )
 
 func TestWriteFile(t *testing.T) {
@@ -56,21 +58,7 @@ func TestRead(t *testing.T) {
 	}
 }
 
-func TestIncorrectRead(t *testing.T) {
-	fs, err := New(os.Getenv("YD"), nil)
-	if err != nil {
-		t.Error(err)
-	}
-	file, err := fs.Open("/Reading")
-	if err != nil {
-		t.Error(err)
-	}
-	buf := make([]byte, 2048)
-	n, err := file.Read(buf)
-	t.Logf("n = %d, err = %v", n, err)
-}
-
-func TestStatRoot(t *testing.T) {
+func TestStat(t *testing.T) {
 	fs, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
@@ -81,6 +69,10 @@ func TestStatRoot(t *testing.T) {
 	}
 	if stat.Name() != "/" || !stat.IsDir() {
 		t.Errorf("Stat() for root dir returns incorrect values, want: %v, have: %v", "/", stat.Name())
+	}
+	info, err := fs.Stat("surelynonexistententry")
+	if err == nil || info != nil {
+		t.Errorf("Stat nonexistent succeeds")
 	}
 }
 
@@ -100,7 +92,7 @@ func TestReadDirFS(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("direntries did not contain test file data")
+		t.Errorf("dir entries did not contain test file data")
 		t.Logf("%+v", entries)
 	}
 }
@@ -127,6 +119,51 @@ func TestMkdir(t *testing.T) {
 	}
 	if _, err := filesystem.Stat(testDirName); err != nil {
 		t.Errorf("error stat test dir: %v", err)
+	}
+}
+
+func TestReadOnADir(t *testing.T) {
+	fs, err := New(os.Getenv("YD"), nil)
+	if err != nil {
+		t.Error(err)
+	}
+	file, err := fs.Open(testDirName)
+	if err != nil {
+		t.Error(err)
+	}
+	buf := make([]byte, 2048)
+	if _, err := file.Read(buf); err == nil {
+		t.Errorf("Read succeeds on a directory")
+	}
+}
+
+func TestMkdirAll(t *testing.T) {
+	fs, err := New(os.Getenv("YD"), nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if err := fs.MkdirAll(testCascadeDirsMake); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestRemoveFailsOnNonEmptyDir(t *testing.T) {
+	fs, err := New(os.Getenv("YD"), nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if err := fs.Remove(testCascadeDirsRemove); err == nil {
+		t.Errorf("Remove should fail on non-empty dir")
+	}
+}
+
+func TestRemoveAll(t *testing.T) {
+	fs, err := New(os.Getenv("YD"), nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if err := fs.RemoveAll(testCascadeDirsRemove); err != nil {
+		t.Error(err)
 	}
 }
 
