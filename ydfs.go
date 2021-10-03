@@ -1,11 +1,13 @@
 package ydfs
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 )
@@ -17,13 +19,26 @@ import (
 // specific to metainformation stored by Yandex -
 // see DiskInfo and UserInfo methods.
 type FS interface {
-	// Open
+	// Open opens the named file.
 	Open(name string) (fs.File, error)
+
+	// Stat returns a FileInfo describing the named file from the file system.
 	Stat(name string) (fs.FileInfo, error)
-	// Sub(dir string) (FS, error)
+
+	// Sub returns an FS corresponding to the subtree rooted at dir.
+	Sub(dir string) (FS, error)
+
+	// ReadFile reads the named file and returns its contents.
+	// A successful call returns a nil error, not io.EOF.
+	// (Because ReadFile reads the whole file, the expected EOF
+	// from the final Read is not treated as an error to be reported.)
+	//
+	// The caller is permitted to modify the returned byte slice.
+	// This method should return a copy of the underlying data.
 	ReadFile(name string) ([]byte, error)
 
-	// TODO: comment
+	// ReadDir reads the named directory
+	// and returns a list of directory entries sorted by filename.
 	ReadDir(name string) ([]fs.DirEntry, error)
 
 	// WriteFile writes data to the named file, creating it if necessary.
@@ -31,7 +46,7 @@ type FS interface {
 	// otherwise WriteFile truncates it before writing.
 	WriteFile(name string, data []byte) error
 
-	// Mkdir creates a new directory in a Disk with the specified name
+	// Mkdir creates a new directory with the specified name
 	Mkdir(name string) error
 
 	// MkdirAll creates a directory named path, along with any necessary parents,
@@ -49,8 +64,9 @@ type FS interface {
 
 // ydfs implements FS interface
 type ydfs struct {
-	client *apiclient
-	path   string
+	client *apiclient // api client
+	path   string     // base path
+	issub  bool       // is this a sub FS?
 }
 
 // New returns ydfs.FS which is compliant with
@@ -68,58 +84,74 @@ func New(token string, client *http.Client) (FS, error) {
 	if _, err := c.getDiskInfo(); err != nil {
 		return nil, err
 	}
-	return &ydfs{client: c, path: "/"}, nil
+	return &ydfs{client: c, path: "/", issub: false}, nil
 }
 
 // Open implements fs.Fs interface
-func (f *ydfs) Open(name string) (fs.File, error) {
-	res, err := f.client.getResourceSingle(name)
+func (y *ydfs) Open(name string) (fs.File, error) {
+	if y.issub {
+		name = path.Join(y.path, name)
+	}
+	res, err := y.client.getResourceMinTraffic(name)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
 	normalizeResource(&res)
 	var file ydfile
-	file.client = f.client
+	file.client = y.client
 	file.path = res.Path
 	file.isdir = (res.Type == "dir")
+	file.size = res.Size
 	return &file, nil
 }
 
 // Stat implements fs.StatFS
-func (f *ydfs) Stat(name string) (fs.FileInfo, error) {
-	res, err := f.client.getResourceSingle(name)
+func (y *ydfs) Stat(name string) (fs.FileInfo, error) {
+	if y.issub {
+		name = path.Join(y.path, name)
+	}
+	res, err := y.client.getResourceMinTraffic(name)
 	if err != nil {
-		return nil, &fs.PathError{Op: "stat", Path: f.path, Err: err}
+		return nil, &fs.PathError{Op: "stat", Path: y.path, Err: err}
 	}
 	normalizeResource(&res)
 	return &ydinfo{res}, nil
 }
 
 // Sub implements fs.SubFS
-func (f *ydfs) Sub(dir string) (FS, error) {
-	res, err := f.client.getResourceSingle(dir)
+func (y *ydfs) Sub(dir string) (FS, error) {
+	if y.issub {
+		dir = path.Join(y.path, dir)
+	}
+	res, err := y.client.getResourceMinTraffic(dir)
 	if err != nil {
-		return nil, err
+		return nil, &fs.PathError{Op: "read", Path: y.path, Err: err}
 	}
 	if res.Type != "dir" {
-		return nil, &fs.PathError{Op: "sub", Path: f.path, Err: err}
+		return nil, &fs.PathError{Op: "sub", Path: y.path, Err: fmt.Errorf("not a directory")}
 	}
 	normalizeResource(&res)
-	return &ydfs{client: f.client, path: res.Path}, nil
+	return &ydfs{client: y.client, path: res.Path, issub: true}, nil
 }
 
 // ReadFile implements fs.ReadFileFS
-func (f *ydfs) ReadFile(name string) ([]byte, error) {
-	data, err := f.client.getFile(name)
+func (y *ydfs) ReadFile(name string) ([]byte, error) {
+	if y.issub {
+		name = path.Join(y.path, name)
+	}
+	data, err := y.client.getFile(name)
 	if err != nil {
-		return []byte{}, &fs.PathError{Op: "read", Path: f.path, Err: err}
+		return []byte{}, &fs.PathError{Op: "read", Path: y.path, Err: err}
 	}
 	return data, nil
 }
 
 // ReadDir implements fs.ReadDirFS
-func (f *ydfs) ReadDir(name string) ([]fs.DirEntry, error) {
-	res, err := f.client.getResourceWithEmbedded(name)
+func (y *ydfs) ReadDir(name string) ([]fs.DirEntry, error) {
+	if y.issub {
+		name = path.Join(y.path, name)
+	}
+	res, err := y.client.getResourceWithEmbedded(name)
 	if err != nil {
 		return []fs.DirEntry{}, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
@@ -127,40 +159,51 @@ func (f *ydfs) ReadDir(name string) ([]fs.DirEntry, error) {
 		return []fs.DirEntry{}, &fs.PathError{Op: "readdirent", Path: name, Err: fmt.Errorf("not a directory")}
 	}
 	entries := make([]fs.DirEntry, len(res.Embedded.Items))
+
+	// TODO: implement sort by filename
 	for i := 0; i < len(res.Embedded.Items); i++ {
 		entries[i] = &ydinfo{res.Embedded.Items[i]}
 	}
 	return entries, nil
 }
 
-func (f *ydfs) WriteFile(name string, data []byte) error {
-	if err := f.client.putFileTruncate(name, data); err != nil {
+func (y *ydfs) WriteFile(name string, data []byte) error {
+	if y.issub {
+		name = path.Join(y.path, name)
+	}
+	if err := y.client.putFileTruncate(name, data); err != nil {
 		return &fs.PathError{Op: "write", Path: name, Err: err}
 	}
 	return nil
 }
 
-func (f *ydfs) Mkdir(name string) error {
-	if err := f.client.mkdir(name); err != nil {
+func (y *ydfs) Mkdir(name string) error {
+	if y.issub {
+		name = path.Join(y.path, name)
+	}
+	if err := y.client.mkdir(name); err != nil {
 		return &fs.PathError{Op: "mkdir", Path: name, Err: err}
 	}
 	return nil
 }
 
-func (f *ydfs) MkdirAll(path string) error {
-	split := strings.Split(strings.Trim(path, "/"), "/")
-	toMake := ""
-	for i := 0; i < len(split); i++ {
-		toMake += "/" + split[i]
-		s, err := f.Stat(toMake)
+func (y *ydfs) MkdirAll(dir string) error {
+	if y.issub {
+		dir = path.Join(y.path, dir)
+	}
+	split := strings.Split(strings.Trim(dir, "/"), "/")
+	toMake := bytes.Buffer{}
+	for i := range split {
+		toMake.WriteString("/" + split[i])
+		s, err := y.Stat(toMake.String())
 		if err != nil && !errors.Is(err, ErrNotFound) {
-			return &fs.PathError{Op: "mkdir", Path: toMake, Err: err}
+			return &fs.PathError{Op: "mkdir", Path: toMake.String(), Err: err}
 		} else if err == nil && !s.IsDir() {
-			return &fs.PathError{Op: "mkdir", Path: toMake, Err: fmt.Errorf("not a directory")}
+			return &fs.PathError{Op: "mkdir", Path: toMake.String(), Err: fmt.Errorf("not a directory")}
 		} else if err == nil && s.IsDir() {
 			continue
 		}
-		if err := f.Mkdir(toMake); err != nil {
+		if err := y.Mkdir(toMake.String()); err != nil {
 			return err
 		}
 	}
@@ -168,103 +211,119 @@ func (f *ydfs) MkdirAll(path string) error {
 }
 
 // Remove implements FS
-func (f *ydfs) Remove(name string) error {
-	res, err := f.client.getResourceWithEmbedded(name)
+func (y *ydfs) Remove(name string) error {
+	if y.issub {
+		name = path.Join(y.path, name)
+	}
+	res, err := y.client.getResourceWithEmbedded(name)
 	if err != nil {
 		return &fs.PathError{Op: "stat", Path: name, Err: err}
 	} else if res.Type == "dir" && len(res.Embedded.Items) > 0 {
 		return &fs.PathError{Op: "remove", Path: name, Err: fmt.Errorf("directory not empty")}
 	}
-	if err := f.client.delResourcePermanently(name); err != nil {
+	if err := y.client.delResourcePermanently(name); err != nil {
 		return &fs.PathError{Op: "remove", Path: name, Err: err}
 	}
 	return nil
 }
 
 // RemoveAll implements FS
-func (f *ydfs) RemoveAll(path string) error {
-	res, err := f.client.getResourceWithEmbedded(path)
+func (y *ydfs) RemoveAll(dir string) error {
+	if y.issub {
+		dir = path.Join(y.path, dir)
+	}
+	res, err := y.client.getResourceWithEmbedded(dir)
 	if err != nil && errors.Is(err, ErrNotFound) {
 		return nil
 	} else if err != nil {
-		return &fs.PathError{Op: "remove", Path: path, Err: err}
+		return &fs.PathError{Op: "remove", Path: dir, Err: err}
 	}
+	// remove children first
 	for i := 0; i < len(res.Embedded.Items); i++ {
-		if err := f.RemoveAll(res.Embedded.Items[i].Path); err != nil {
+		if err := y.RemoveAll(res.Embedded.Items[i].Path); err != nil {
 			return err
 		}
 	}
-	if err := f.client.delResourcePermanently(path); err != nil {
-		return &fs.PathError{Op: "remove", Path: path, Err: err}
+	// remove parent
+	if err := y.client.delResourcePermanently(dir); err != nil {
+		return &fs.PathError{Op: "remove", Path: dir, Err: err}
 	}
 	return nil
 }
 
 // ydfile implements File interface
 type ydfile struct {
-	client   *apiclient
-	path     string
-	isdir    bool
-	rdoffset int
-	roffset  int
-	data     []byte
+	client *apiclient // api client
+	path   string     // file path including its name
+	// name     string     // file name
+	isdir bool // sets to true if file is a directory
+	// mode     fs.FileMode
+	rdoffset int    // read dir offset for directories
+	roffset  int    // read offset for regular files
+	size     int64  // actual data size in bytes
+	data     []byte // payload of a file
 }
 
 // Read implements fs.File
-func (f *ydfile) Read(b []byte) (int, error) {
-	if f.isdir {
-		return 0, &fs.PathError{Op: "read", Path: f.path, Err: fmt.Errorf("is a directory")}
+func (file *ydfile) Read(b []byte) (int, error) {
+	if file.isdir {
+		return 0, &fs.PathError{Op: "read", Path: file.path, Err: fmt.Errorf("is a directory")}
 	}
-	if f.data == nil {
-		fileBytes, err := f.client.getFile(f.path)
+	// TODO: implement download in chunks to only fetch
+	// required data
+	if file.data == nil {
+		fileBytes, err := file.client.getFile(file.path)
 		if err != nil {
-			return 0, &fs.PathError{Op: "read", Path: f.path, Err: err}
+			return 0, &fs.PathError{Op: "read", Path: file.path, Err: err}
 		}
-		f.data = fileBytes
-		f.roffset = 0
+		file.data = fileBytes
+		file.roffset = 0
 	}
-	if f.roffset == len(f.data) {
+	if file.roffset == len(file.data) {
 		return 0, io.EOF
 	}
-	var err error
-	toRead := len(b)
-	doneReading := 0
-	if toRead > len(f.data[f.roffset:]) {
-		toRead = len(f.data[f.roffset:])
+	var (
+		err         error
+		toRead      int = len(b)
+		doneReading int = 0
+	)
+	if toRead > len(file.data[file.roffset:]) {
+		toRead = len(file.data[file.roffset:])
 		err = io.EOF
 	}
 	for i := 0; i < toRead; i++ {
-		b[i] = f.data[f.roffset]
-		f.roffset++
+		b[i] = file.data[file.roffset]
+		file.roffset++
 		doneReading++
 	}
 	return doneReading, err
 }
 
 // Stat implements fs.File.
-func (f *ydfile) Stat() (fs.FileInfo, error) {
-	res, err := f.client.getResourceSingle(f.path)
+func (file *ydfile) Stat() (fs.FileInfo, error) {
+	res, err := file.client.getResourceMinTraffic(file.path)
 	if err != nil {
-		return nil, &fs.PathError{Op: "stat", Path: f.path, Err: err}
+		return nil, &fs.PathError{Op: "stat", Path: file.path, Err: err}
 	}
 	normalizeResource(&res)
 	return &ydinfo{res}, err
 }
 
 // Close implements fs.File
-func (f *ydfile) Close() error {
-	f.roffset = len(f.data)
+func (file *ydfile) Close() error {
+	file.data = []byte{}
+	file.roffset = 0
 	return nil
 }
 
 // ReadDir implements fs.ReadDirFile.
-func (f *ydfile) ReadDir(n int) ([]fs.DirEntry, error) {
-	if !f.isdir {
-		return []fs.DirEntry{}, &fs.PathError{Op: "readdirent", Path: f.path, Err: fmt.Errorf("not a directory")}
+func (file *ydfile) ReadDir(n int) ([]fs.DirEntry, error) {
+	if !file.isdir {
+		return []fs.DirEntry{}, &fs.PathError{Op: "readdirent", Path: file.path, Err: fmt.Errorf("not a directory")}
 	}
-	res, err := f.client.getResourceWithEmbedded(f.path)
+	res, err := file.client.getResourceWithEmbedded(file.path)
 	if err != nil {
-		return []fs.DirEntry{}, &fs.PathError{Op: "readdirent", Path: f.path, Err: err}
+		return []fs.DirEntry{}, &fs.PathError{Op: "readdirent", Path: file.path, Err: err}
 	}
 	var (
 		entries   []fs.DirEntry
@@ -272,10 +331,10 @@ func (f *ydfile) ReadDir(n int) ([]fs.DirEntry, error) {
 	)
 	// TODO: test logic here
 	total := len(res.Embedded.Items)
-	remaining := total - f.rdoffset
+	remaining := total - file.rdoffset
 	if n < 1 {
 		n = total
-		f.rdoffset = 0
+		file.rdoffset = 0
 	} else if n > remaining {
 		n = remaining
 		errResult = io.EOF
@@ -284,8 +343,8 @@ func (f *ydfile) ReadDir(n int) ([]fs.DirEntry, error) {
 	}
 	entries = make([]fs.DirEntry, n)
 	for i := 0; i < n; i++ {
-		entries[i] = &ydinfo{res.Embedded.Items[f.rdoffset]}
-		f.rdoffset++
+		entries[i] = &ydinfo{res.Embedded.Items[file.rdoffset]}
+		file.rdoffset++
 	}
 	return entries, errResult
 }

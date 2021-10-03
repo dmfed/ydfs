@@ -15,6 +15,8 @@ var (
 	testFileName          = "test.txt"
 	testDirName           = "/test/"
 	testCascadeDirsMake   = "/test2/test3/test4"
+	testSubFSDir          = "/test2"
+	testSubFSExistingDir  = "test3"
 	testCascadeDirsRemove = "/test2"
 )
 
@@ -29,59 +31,74 @@ func TestWriteFile(t *testing.T) {
 }
 
 func TestRead(t *testing.T) {
-	fs, err := New(os.Getenv("YD"), nil)
+	filesystem, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
+		return
 	}
-	file, err := fs.Open(testFileName)
+	file, err := filesystem.Open(testFileName)
 	if err != nil {
 		t.Error(err)
+		return
 	}
 	buf := make([]byte, len(testFileBody))
 	n, err := file.Read(buf)
 	if n != len(testFileBody) || err != nil {
 		t.Errorf("file Read() fails, want n = %v, have n = %v, err: %v", len(testFileBody), n, err)
+		return
 	}
 	stats, err := file.Stat()
 	if err != nil {
 		t.Error(err)
+		return
 	}
 	if !(stats.Name() == testFileName) || stats.IsDir() {
 		t.Errorf("testfile Stat() method returns incorrect values, want: %v, have: %v", testFileName, stats.Name())
+		return
 	}
 	if !bytes.Equal(buf, testFileBody) {
 		t.Errorf("test file received from disk differs")
+		return
 	}
 	anotherbuf := make([]byte, 10)
 	if n, err := file.Read(anotherbuf); n > 0 || !errors.Is(err, io.EOF) {
 		t.Errorf("file Read does not return EOF want n = 0, got n = %d", n)
+		return
+	}
+	if err := file.Close(); err != nil {
+		t.Errorf("file.Close() returned error: %v", err)
+	}
+	if _, err := file.Read(anotherbuf); err == nil {
+		t.Errorf("file.Read() after file.Close() returned no error")
 	}
 }
 
 func TestStat(t *testing.T) {
-	fs, err := New(os.Getenv("YD"), nil)
+	filesystem, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
 	}
-	stat, err := fs.Stat("/")
+	stat, err := filesystem.Stat("/")
 	if err != nil {
 		t.Error(err)
 	}
-	if stat.Name() != "/" || !stat.IsDir() {
+	if stat.Name() != "/" {
 		t.Errorf("Stat() for root dir returns incorrect values, want: %v, have: %v", "/", stat.Name())
+	} else if !stat.IsDir() {
+		t.Errorf("Stat() for root dir returns incorrect type, want IsDir() == true, have: %v", stat.IsDir())
 	}
-	info, err := fs.Stat("surelynonexistententry")
+	info, err := filesystem.Stat("surelynonexistententry")
 	if err == nil || info != nil {
-		t.Errorf("Stat nonexistent succeeds")
+		t.Errorf("Stat nonexistent entry succeeds")
 	}
 }
 
 func TestReadDirFS(t *testing.T) {
-	fs, err := New(os.Getenv("YD"), nil)
+	filesystem, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
 	}
-	entries, err := fs.ReadDir("/")
+	entries, err := filesystem.ReadDir("/")
 	if err != nil {
 		t.Error(err)
 	}
@@ -123,11 +140,11 @@ func TestMkdir(t *testing.T) {
 }
 
 func TestReadOnADir(t *testing.T) {
-	fs, err := New(os.Getenv("YD"), nil)
+	filesystem, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
 	}
-	file, err := fs.Open(testDirName)
+	file, err := filesystem.Open(testDirName)
 	if err != nil {
 		t.Error(err)
 	}
@@ -138,32 +155,67 @@ func TestReadOnADir(t *testing.T) {
 }
 
 func TestMkdirAll(t *testing.T) {
-	fs, err := New(os.Getenv("YD"), nil)
+	filesystem, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
 	}
-	if err := fs.MkdirAll(testCascadeDirsMake); err != nil {
+	if err := filesystem.MkdirAll(testCascadeDirsMake); err != nil {
 		t.Error(err)
 	}
 }
 
 func TestRemoveFailsOnNonEmptyDir(t *testing.T) {
-	fs, err := New(os.Getenv("YD"), nil)
+	filesystem, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
+		return
 	}
-	if err := fs.Remove(testCascadeDirsRemove); err == nil {
-		t.Errorf("Remove should fail on non-empty dir")
+	if err := filesystem.Remove(testCascadeDirsRemove); err == nil {
+		t.Errorf("Remove doesn't fail on non-empty dir")
+	}
+}
+
+func TestSubFS(t *testing.T) {
+	filesystem, err := New(os.Getenv("YD"), nil)
+	if err != nil {
+		t.Errorf("error creating filesystem: %v", err)
+		return
+	}
+	subfs, err := filesystem.Sub(testSubFSDir)
+	if err != nil {
+		t.Errorf("Sub() returned error: %v", err)
+		return
+	}
+	if _, err := subfs.Stat(testDirName); err == nil {
+		t.Errorf("subfs Stats file below root")
+		return
+	}
+
+	s, err := subfs.Stat(testSubFSExistingDir)
+	if err != nil {
+		t.Errorf("subfs can not stat existing file")
+		return
+	}
+	if s.Name() != testSubFSExistingDir {
+		t.Errorf("subfs returns incorrect fileinfo")
+	}
+	s, err = subfs.Stat("/")
+	if err != nil {
+		t.Errorf("subfs can not stat its root")
+		return
+	}
+	if s.Name() != "/" {
+		t.Errorf("subfs root name is incorrect. want: %s, have: %s", "/", s.Name())
 	}
 }
 
 func TestRemoveAll(t *testing.T) {
-	fs, err := New(os.Getenv("YD"), nil)
+	filesystem, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
 	}
-	if err := fs.RemoveAll(testCascadeDirsRemove); err != nil {
-		t.Error(err)
+	if err := filesystem.RemoveAll(testCascadeDirsRemove); err != nil {
+		t.Errorf("error trying cascade remove: %v", err)
 	}
 }
 

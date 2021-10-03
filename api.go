@@ -2,6 +2,7 @@ package ydfs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -39,6 +41,8 @@ const (
 	urlOperations = urlBase + "/operations"
 )
 
+var minimalFields = []string{"name", "path", "type", "size", "modified"}
+
 var (
 	ErrNetwork  = errors.New("network error")
 	ErrAPI      = errors.New("API error")
@@ -63,28 +67,31 @@ func newApiClient(token string, c *http.Client) *apiclient {
 }
 
 // processes request returns response body bytes and error
-// if we're getting non-OK status the method tries to unmarshal
-// api error to struct which imlements error interface.
-func (c *apiclient) do(r *http.Request) ([]byte, error) {
+// if we're getting status not equal to the requiredcode the method tries to unmarshal
+// response to errAPI struct which imlements error interface.
+func (c *apiclient) do(ctx context.Context, r *http.Request, requiredcode int) ([]byte, error) {
 	r.Header = c.header
 	var (
 		resp *http.Response
 		err  error
+		data []byte
 	)
+	if ctx != nil {
+		r = r.WithContext(ctx)
+	}
 	resp, err = c.client.Do(r)
 	if err != nil {
 		return []byte{}, fmt.Errorf("%w: %v", ErrNetwork, err)
 	}
 	defer resp.Body.Close()
 
-	var data []byte
 	data, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return []byte{}, fmt.Errorf("%w: %v", ErrNetwork, err)
 	}
 
-	// checking if we've got one of success codes
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+	// checking if we've got correct result code
+	if resp.StatusCode != requiredcode {
 		var e errAPI
 		if err = json.Unmarshal(data, &e); err != nil {
 			return []byte{}, fmt.Errorf("%w: unknown response with code %d from API: %s", ErrUnknown, resp.StatusCode, string(data))
@@ -100,19 +107,21 @@ func (c *apiclient) do(r *http.Request) ([]byte, error) {
 	return data, nil
 }
 
-// requestInterface performs most of the weight lifting with API. If result argument it non-nil
+// requestInterface performs some of the weight lifting with API. If result argument it non-nil
 // then the method tries to unmarshal response into the passed interface.
 // If no body is expected in response or the body needs to be thrown away,
 // result must be nil.
-func (c *apiclient) requestInterface(method string, u *url.URL, body io.Reader, result interface{}) (err error) {
-	var r *http.Request
-	r, err = http.NewRequest(method, u.String(), body)
+func (c *apiclient) requestInterface(method string, respcode int, url string, body io.Reader, result interface{}) (err error) {
+	var (
+		r    *http.Request
+		data []byte
+	)
+	r, err = http.NewRequest(method, url, body)
 	if err != nil {
 		return
 	}
 
-	var data []byte
-	if data, err = c.do(r); err != nil {
+	if data, err = c.do(context.TODO(), r, respcode); err != nil {
 		return
 	}
 	// If nil result argument is passed, we don't want
@@ -130,67 +139,55 @@ func (c *apiclient) requestInterface(method string, u *url.URL, body io.Reader, 
 
 // getDiskInfo fetches information about user's Disk.
 func (c *apiclient) getDiskInfo() (info diskInfo, err error) {
-	u, err := url.Parse(urlBase)
-	if err != nil {
-		return
-	}
-	err = c.requestInterface(http.MethodGet, u, nil, &info)
+	err = c.requestInterface(http.MethodGet, http.StatusOK, urlBase, nil, &info)
 	return
 }
 
 // getFile fetches single file bytes.
 func (c *apiclient) getFile(name string) ([]byte, error) {
 	// first we need to fetch the download url
-	u, err := url.Parse(urlResourcesDownload)
-	if err != nil {
-		return []byte{}, fmt.Errorf("%w: %v", ErrInternal, err)
-	}
+
 	v := make(url.Values)
 	v.Add("path", name)
-	u.RawQuery = v.Encode()
-
+	url := urlResourcesDownload + "?" + v.Encode()
 	var l = &link{}
-	if err = c.requestInterface(http.MethodGet, u, nil, l); err != nil {
+	if err := c.requestInterface(http.MethodGet, http.StatusOK, url, nil, l); err != nil {
 		return []byte{}, err
 	}
 	if l.Templated {
 		// TODO: deal with templated links (I haven't seen one yet)
 	}
 	// performing the actual download
-	r, err := http.NewRequest(http.MethodGet, l.Href, nil)
+	r, err := http.NewRequest(l.Method, l.Href, nil)
 	if err != nil {
 		return []byte{}, fmt.Errorf("%w: %v", ErrInternal, err)
 	}
-	return c.do(r)
+	return c.do(context.TODO(), r, http.StatusOK)
 }
 
 func (c *apiclient) putFile(name string, overwrite bool, data []byte) error {
-	u, err := url.Parse(urlResourcesUpload)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrInternal, err)
-	}
 	v := make(url.Values)
 	v.Add("path", name)
 	if overwrite {
 		v.Add("overwrite", "true")
 	}
-	u.RawQuery = v.Encode()
+
+	url := urlResourcesUpload + "?" + v.Encode()
 	var l = &link{}
-	if err = c.requestInterface(http.MethodGet, u, nil, l); err != nil {
+	if err := c.requestInterface(http.MethodGet, http.StatusOK, url, nil, l); err != nil {
 		return err
 	}
 
-	switch l.Templated {
-	case true:
-		fallthrough
-	default:
+	if l.Templated {
+		// TODO: deal with templated links (I haven't seen one yet)
 	}
+
 	// performing the actual upload
-	r, err := http.NewRequest(http.MethodPut, l.Href, bytes.NewReader(data))
+	r, err := http.NewRequest(l.Method, l.Href, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInternal, err)
 	}
-	_, err = c.do(r)
+	_, err = c.do(context.TODO(), r, http.StatusCreated)
 	return err
 }
 
@@ -203,42 +200,42 @@ func (c *apiclient) putFileNoTruncate(name string, data []byte) error {
 }
 
 func (c *apiclient) mkdir(name string) error {
-	u, err := url.Parse(urlResources)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrInternal, err)
-	}
 	v := make(url.Values)
 	v.Add("path", name)
-	u.RawQuery = v.Encode()
+	url := urlResources + "?" + v.Encode()
 	var l = link{}
-	err = c.requestInterface(http.MethodPut, u, nil, &l)
-	return err
+	return c.requestInterface(http.MethodPut, http.StatusCreated, url, nil, &l)
 }
 
 // getResource fetches Resource identified by name from the API.
-// if limit >= 0 then len(Resource.Embedded.Items) will not exceed limit.
-func (c *apiclient) getResource(name string, limit int) (r resource, err error) {
-	u, err := url.Parse(urlResources)
-	if err != nil {
-		err = fmt.Errorf("%w: %v", ErrInternal, err)
-		return
-	}
+// if limit == 0 then embedded resources will not be requested not included
+// if limit > 0 then len(Resource.Embedded.Items) will not exceed limit.
+func (c *apiclient) getResource(name string, limit int, fields ...string) (r resource, err error) {
 	v := make(url.Values)
 	v.Add("path", name)
 	if limit >= 0 {
 		v.Add("limit", strconv.Itoa(limit))
 	}
-	u.RawQuery = v.Encode()
-	err = c.requestInterface(http.MethodGet, u, nil, &r)
+	if len(fields) > 0 {
+		v.Add("fields", strings.Join(fields, ","))
+	}
+	url := urlResources + "?" + v.Encode()
+	err = c.requestInterface(http.MethodGet, http.StatusOK, url, nil, &r)
 	return
 }
 
-// getResourceSingle fetches Resource without embedded resuorces
+// getResourceSingle fetches resource without embedded resources
 func (c *apiclient) getResourceSingle(name string) (resource, error) {
 	return c.getResource(name, 0)
 }
 
-// getResourceWithEmbedded fetches Resource with embedded resources
+// getResourceMinTraffic fetches resource only requesting minimum
+// required onfo for FS to fucntion. minimalFields is globally declared.
+func (c *apiclient) getResourceMinTraffic(name string) (resource, error) {
+	return c.getResource(name, 0, minimalFields...)
+}
+
+// getResourceWithEmbedded fetches resource with embedded resources
 func (c *apiclient) getResourceWithEmbedded(name string) (resource, error) {
 	return c.getResource(name, -1)
 }
@@ -256,9 +253,9 @@ func (c *apiclient) delResource(name string, permanently bool) error {
 	u.RawQuery = v.Encode()
 	r, err := http.NewRequest(http.MethodDelete, u.String(), nil)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrInternal, err)
+		return err
 	}
-	_, err = c.do(r)
+	_, err = c.do(context.TODO(), r, http.StatusNoContent)
 	return err
 }
 
