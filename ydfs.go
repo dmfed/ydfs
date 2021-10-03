@@ -89,10 +89,11 @@ func New(token string, client *http.Client) (FS, error) {
 
 // Open implements fs.Fs interface
 func (y *ydfs) Open(name string) (fs.File, error) {
+	var fullname string
 	if y.issub {
-		name = path.Join(y.path, name)
+		fullname = path.Join(y.path, name)
 	}
-	res, err := y.client.getResourceMinTraffic(name)
+	res, err := y.client.getResourceMinTraffic(fullname)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
