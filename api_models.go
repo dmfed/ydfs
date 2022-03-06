@@ -54,7 +54,7 @@ type resource struct {
 	Path             string            `json:"path,omitempty"`
 	MD5              string            `json:"md5,omitempty"`
 	SHA256           string            `json:"sha26,omitempty"`
-	CommentIDs       CommentIDs        `json:"comment_ids,omitempty"`      // undocumented :)
+	CommentIDs       commentIDs        `json:"comment_ids,omitempty"`      // undocumented :)
 	Type             string            `json:"type,omitempty"`             // "dir" or "file"
 	MimeType         string            `json:"mime_type,omitempty"`        // "image/jpeg", "video/mp4" etc.
 	Size             int64             `json:"size,omitempty"`             // size in bytes (?)
@@ -74,7 +74,7 @@ type resourceList struct {
 	Total     int        `json:"total,omitempty"`  // total number of elements in directory
 }
 
-type CommentIDs struct {
+type commentIDs struct {
 	PrivateResourceID string `json:"private_resource,omitempty"`
 	PublicResourseID  string `json:"public_resource,omitempty"`
 }
