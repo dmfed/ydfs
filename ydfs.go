@@ -92,6 +92,8 @@ func (y *ydfs) Open(name string) (fs.File, error) {
 	var fullname string
 	if y.issub {
 		fullname = path.Join(y.path, name)
+	} else {
+		fullname = name
 	}
 	res, err := y.client.getResourceMinTraffic(fullname)
 	if err != nil {

@@ -213,13 +213,12 @@ func (c *apiclient) mkdir(name string) error {
 func (c *apiclient) getResource(name string, limit int, fields ...string) (r resource, err error) {
 	v := make(url.Values)
 	v.Add("path", name)
-	if limit >= 0 {
-		v.Add("limit", strconv.Itoa(limit))
-	}
+	v.Add("limit", strconv.Itoa(limit))
 	if len(fields) > 0 {
 		v.Add("fields", strings.Join(fields, ","))
 	}
 	url := urlResources + "?" + v.Encode()
+	fmt.Printf("URL: %v\n", url)
 	err = c.requestInterface(http.MethodGet, http.StatusOK, url, nil, &r)
 	return
 }
