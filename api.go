@@ -218,7 +218,6 @@ func (c *apiclient) getResource(name string, limit int, fields ...string) (r res
 		v.Add("fields", strings.Join(fields, ","))
 	}
 	url := urlResources + "?" + v.Encode()
-	fmt.Printf("URL: %v\n", url)
 	err = c.requestInterface(http.MethodGet, http.StatusOK, url, nil, &r)
 	return
 }
@@ -236,7 +235,7 @@ func (c *apiclient) getResourceMinTraffic(name string) (resource, error) {
 
 // getResourceWithEmbedded fetches resource with embedded resources
 func (c *apiclient) getResourceWithEmbedded(name string) (resource, error) {
-	return c.getResource(name, -1)
+	return c.getResource(name, (1<<63)-1)
 }
 
 func (c *apiclient) delResource(name string, permanently bool) error {

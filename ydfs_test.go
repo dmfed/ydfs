@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"testing"
 )
 
@@ -52,7 +53,7 @@ func TestRead(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	if !(stats.Name() == testFileName) || stats.IsDir() {
+	if !(stats.Name() == testRootDirName+testFileName) || stats.IsDir() {
 		t.Errorf("testfile Stat() method returns incorrect values, want: %v, have: %v", testFileName, stats.Name())
 		return
 	}
@@ -73,7 +74,23 @@ func TestRead(t *testing.T) {
 	}
 }
 
-func TestStat(t *testing.T) {
+func TestStatFile(t *testing.T) {
+	filesystem, err := New(os.Getenv("YD"), nil)
+	if err != nil {
+		t.Error(err)
+	}
+	stat, err := filesystem.Stat(testFileName)
+	if err != nil {
+		t.Error(err)
+	}
+	if stat.Name() != testRootDirName+testFileName {
+		t.Errorf("Stat() for test file returns incorrect values, want: %v, have: %v", testRootDirName+testFileName, stat.Name())
+	} else if stat.IsDir() {
+		t.Errorf("Stat() for test file returns incorrect type, want IsDir() == false, have: %v", stat.IsDir())
+	}
+}
+
+func TestStatRoot(t *testing.T) {
 	filesystem, err := New(os.Getenv("YD"), nil)
 	if err != nil {
 		t.Error(err)
@@ -104,8 +121,9 @@ func TestReadDirFS(t *testing.T) {
 	}
 	found := false
 	for _, entry := range entries {
-		if entry.Name() == testFileName && !entry.IsDir() {
+		if entry.Name() == path.Join(testRootDirName, testFileName) && !entry.IsDir() {
 			found = true
+			break
 		}
 	}
 	if !found {
@@ -196,7 +214,7 @@ func TestSubFS(t *testing.T) {
 		t.Errorf("subfs can not stat existing file")
 		return
 	}
-	if s.Name() != testSubFSExistingDir {
+	if s.Name() != path.Join(testRootDirName, testSubFSExistingDir) {
 		t.Errorf("subfs returns incorrect fileinfo")
 	}
 	s, err = subfs.Stat("/")

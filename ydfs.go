@@ -99,7 +99,7 @@ func (y *ydfs) Open(name string) (fs.File, error) {
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
-	normalizeResource(&res)
+	normalizeResourcePath(&res)
 	var file ydfile
 	file.client = y.client
 	file.path = res.Path
@@ -117,7 +117,13 @@ func (y *ydfs) Stat(name string) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, &fs.PathError{Op: "stat", Path: y.path, Err: err}
 	}
-	normalizeResource(&res)
+	normalizeResourcePath(&res)
+	if y.issub {
+		res.Path = strings.TrimPrefix(res.Path, y.path)
+		if res.Path == "" {
+			res.Path = "/"
+		}
+	}
 	return &ydinfo{res}, nil
 }
 
@@ -133,7 +139,7 @@ func (y *ydfs) Sub(dir string) (FS, error) {
 	if res.Type != "dir" {
 		return nil, &fs.PathError{Op: "sub", Path: y.path, Err: fmt.Errorf("not a directory")}
 	}
-	normalizeResource(&res)
+	normalizeResourcePath(&res)
 	return &ydfs{client: y.client, path: res.Path, issub: true}, nil
 }
 
@@ -308,7 +314,7 @@ func (file *ydfile) Stat() (fs.FileInfo, error) {
 	if err != nil {
 		return nil, &fs.PathError{Op: "stat", Path: file.path, Err: err}
 	}
-	normalizeResource(&res)
+	normalizeResourcePath(&res)
 	return &ydinfo{res}, err
 }
 
@@ -359,7 +365,8 @@ type ydinfo struct {
 
 // Name implements fs.FileInfo
 func (y *ydinfo) Name() string {
-	return y.res.Name
+	normalizeResourcePath(&y.res)
+	return y.res.Path
 }
 
 // Size implements fs.FileInfo
@@ -370,7 +377,7 @@ func (y *ydinfo) Size() int64 {
 // Mode implements fs.FileInfo
 func (y *ydinfo) Mode() fs.FileMode {
 	if y.IsDir() {
-		return 1 << (32 - 1) // the only required parameter for filemode
+		return fs.ModeDir
 	}
 	return 0
 }
@@ -400,7 +407,7 @@ func (y *ydinfo) Info() (fs.FileInfo, error) {
 	return y, nil
 }
 
-func normalizeResource(r *resource) {
+func normalizeResourcePath(r *resource) {
 	r.Path = strings.Replace(r.Path, "disk:", "", 1)
 	if r.Path == "/" && r.Name == "disk" {
 		r.Name = "/"
