@@ -233,14 +233,14 @@ func (c *apiclient) getResourceSingle(name string) (resource, error) {
 }
 
 // getResourceMinTraffic fetches resource only requesting minimum
-// required onfo for FS to fucntion. minimalFields is globally declared.
+// required info for FS to function. minimalFields is globally declared.
 func (c *apiclient) getResourceMinTraffic(name string) (resource, error) {
 	return c.getResource(name, 0, minimalFields...)
 }
 
 // getResourceWithEmbedded fetches resource with embedded resources
 func (c *apiclient) getResourceWithEmbedded(name string) (resource, error) {
-	return c.getResource(name, (1<<63)-1)
+	return c.getResource(name, (1<<31)-1)
 }
 
 func (c *apiclient) delResource(name string, permanently bool) error {
