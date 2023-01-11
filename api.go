@@ -149,9 +149,10 @@ func (c *apiclient) getFile(name string) ([]byte, error) {
 
 	v := make(url.Values)
 	v.Add("path", name)
-	url := urlResourcesDownload + "?" + v.Encode()
+	url, _ := url.Parse(urlResourcesDownload)
+	url.RawQuery = v.Encode()
 	var l = &link{}
-	if err := c.requestInterface(http.MethodGet, http.StatusOK, url, nil, l); err != nil {
+	if err := c.requestInterface(http.MethodGet, http.StatusOK, url.String(), nil, l); err != nil {
 		return []byte{}, err
 	}
 	if l.Templated {
@@ -172,9 +173,10 @@ func (c *apiclient) putFile(name string, overwrite bool, data []byte) error {
 		v.Add("overwrite", "true")
 	}
 
-	url := urlResourcesUpload + "?" + v.Encode()
+	url, _ := url.Parse(urlResourcesUpload)
+	url.RawQuery = v.Encode()
 	var l = &link{}
-	if err := c.requestInterface(http.MethodGet, http.StatusOK, url, nil, l); err != nil {
+	if err := c.requestInterface(http.MethodGet, http.StatusOK, url.String(), nil, l); err != nil {
 		return err
 	}
 
@@ -202,9 +204,10 @@ func (c *apiclient) putFileNoTruncate(name string, data []byte) error {
 func (c *apiclient) mkdir(name string) error {
 	v := make(url.Values)
 	v.Add("path", name)
-	url := urlResources + "?" + v.Encode()
+	url, _ := url.Parse(urlResources)
+	url.RawQuery = v.Encode()
 	var l = link{}
-	return c.requestInterface(http.MethodPut, http.StatusCreated, url, nil, &l)
+	return c.requestInterface(http.MethodPut, http.StatusCreated, url.String(), nil, &l)
 }
 
 // getResource fetches Resource identified by name from the API.
@@ -217,8 +220,10 @@ func (c *apiclient) getResource(name string, limit int, fields ...string) (r res
 	if len(fields) > 0 {
 		v.Add("fields", strings.Join(fields, ","))
 	}
-	url := urlResources + "?" + v.Encode()
-	err = c.requestInterface(http.MethodGet, http.StatusOK, url, nil, &r)
+	url, _ := url.Parse(urlResources)
+	url.RawQuery = v.Encode()
+	fmt.Printf("URL: %s\n", url)
+	err = c.requestInterface(http.MethodGet, http.StatusOK, url.String(), nil, &r)
 	return
 }
 
@@ -239,10 +244,7 @@ func (c *apiclient) getResourceWithEmbedded(name string) (resource, error) {
 }
 
 func (c *apiclient) delResource(name string, permanently bool) error {
-	u, err := url.Parse(urlResources)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrInternal, err)
-	}
+	u, _ := url.Parse(urlResources)
 	v := make(url.Values)
 	v.Add("path", name)
 	if permanently {

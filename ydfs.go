@@ -248,7 +248,7 @@ func (y *ydfs) RemoveAll(dir string) error {
 		return &fs.PathError{Op: "remove", Path: dir, Err: err}
 	}
 	// remove children first
-	for i := 0; i < len(res.Embedded.Items); i++ {
+	for i := range res.Embedded.Items {
 		if err := y.RemoveAll(res.Embedded.Items[i].Path); err != nil {
 			return err
 		}
